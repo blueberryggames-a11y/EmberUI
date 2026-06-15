@@ -1,5 +1,5 @@
 --[[
-    EmberUI - Standalone Roblox UI Library v2
+    EmberUI - Standalone Roblox UI Library v3
     A LocalScript-based UI library using only standard Roblox APIs.
     Place this as a LocalScript inside StarterPlayerScripts (or any client-side container).
 
@@ -176,20 +176,21 @@ function EmberUI.CreateWindow(title)
 
     local shadowLayers = {}
     do
-        local layerCount = 5
+        local layerCount = 6
+        local baseCorner = 10
         for i = 1, layerCount do
-            local extra = i * 10
+            local extra = i * 16
             local layer = create("Frame", {
                 Name = "Layer" .. i,
                 AnchorPoint = Vector2.new(0.5, 0.5),
-                Position = UDim2.new(0.5, 0, 0.5, 2),
+                Position = UDim2.new(0.5, 0, 0.5, 0),
                 Size = UDim2.new(1, extra, 1, extra),
                 BackgroundColor3 = Color3.fromRGB(0, 0, 0),
-                BackgroundTransparency = 1 - (0.10 - (i - 1) * 0.015),
+                BackgroundTransparency = 1 - (0.09 - (i - 1) * 0.013),
                 BorderSizePixel = 0,
                 ZIndex = 0,
                 Parent = shadow,
-            }, { corner(10 + i * 2) })
+            }, { corner(baseCorner + extra / 2) })
             table.insert(shadowLayers, layer)
         end
     end
@@ -415,18 +416,27 @@ function EmberUI.CreateWindow(title)
         Parent = mainFrame,
     })
 
-    create("TextLabel", {
-        Name = "Grip",
-        BackgroundTransparency = 1,
-        Size = UDim2.new(1, 0, 1, 0),
-        Font = Theme.FontBold,
-        Text = "⌟",
-        TextColor3 = Theme.SubText,
-        TextTransparency = 0.5,
-        TextSize = 16,
-        ZIndex = 5,
-        Parent = resizeHandle,
-    })
+    -- three small dots arranged diagonally, like a classic resize grip
+    do
+        local dotPositions = {
+            UDim2.new(1, -4, 1, -4),
+            UDim2.new(1, -4, 1, -10),
+            UDim2.new(1, -10, 1, -4),
+        }
+        for _, pos in ipairs(dotPositions) do
+            create("Frame", {
+                Name = "GripDot",
+                AnchorPoint = Vector2.new(1, 1),
+                Position = pos,
+                Size = UDim2.new(0, 3, 0, 3),
+                BackgroundColor3 = Theme.SubText,
+                BackgroundTransparency = 0.5,
+                BorderSizePixel = 0,
+                ZIndex = 5,
+                Parent = resizeHandle,
+            }, { corner(2) })
+        end
+    end
 
     local minSize = Vector2.new(420, 280)
 
@@ -500,7 +510,7 @@ function EmberUI.CreateWindow(title)
 
     local function setShadowTransparency(alphaMultiplier)
         for i, layer in ipairs(shadowLayers) do
-            local baseTransparency = 1 - (0.10 - (i - 1) * 0.015)
+            local baseTransparency = 1 - (0.09 - (i - 1) * 0.013)
             local fadedTransparency = 1 - (1 - baseTransparency) * alphaMultiplier
             layer.BackgroundTransparency = fadedTransparency
         end
