@@ -1,11 +1,11 @@
 --[[
-    EmberUI - Standalone Roblox UI Library
+    EmberUI - Standalone Roblox UI Library V1
     A LocalScript-based UI library using only standard Roblox APIs.
     Place this as a LocalScript inside StarterPlayerScripts (or any client-side container).
 
     Usage:
         local Window = EmberUI.CreateWindow("My Window")
-        local Tab = Window:CreateTab("Main", "rbxassetid://0")
+        local Tab = Window:CreateTab("Main", "house") -- icon name (lucide by default) or rbxassetid://
 
         Tab:CreateLabel("Hello there")
         Tab:CreateButton("Click me", function() print("clicked") end)
@@ -15,6 +15,14 @@
         Tab:CreateDropdown("Mode", {"One","Two","Three"}, "One", function(selected) print(selected) end)
 
         Window:SetBackgroundImage("rbxassetid://0") -- optional, defaults to black
+        Window:SetToggleKey(Enum.KeyCode.K)          -- default is K
+
+    Icons:
+        EmberUI uses the Footagesus Icons library (lucide by default) for tab icons.
+        Pass an icon name (e.g. "house", "settings") or "rbxassetid://..." directly.
+        Icons are loaded lazily on first use via HttpGet - make sure "Allow HTTP Requests"
+        is enabled in Game Settings > Security, or pre-load your own copy with
+        EmberUI.SetIconsModule(IconsModule).
 ]]
 
 local TweenService = game:GetService("TweenService")
@@ -25,6 +33,68 @@ local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
 local EmberUI = {}
+
+-- ===================== ICONS =====================
+-- Footagesus Icons (MIT licensed icon pack for Roblox UI)
+local ICONS_URL = "https://raw.githubusercontent.com/Footagesus/Icons/main/Main-v2.lua"
+local Icons = nil
+local iconsLoaded = false
+
+local function loadIcons()
+    if iconsLoaded then return Icons end
+    iconsLoaded = true
+
+    local ok, result = pcall(function()
+        return loadstring(game:HttpGet(ICONS_URL))()
+    end)
+
+    if ok and result then
+        Icons = result
+        pcall(function()
+            Icons.SetIconsType("lucide") -- default icon set
+        end)
+    else
+        warn("EmberUI: failed to load Icons module - " .. tostring(result))
+        Icons = nil
+    end
+
+    return Icons
+end
+
+-- Allow consumers to inject a pre-loaded Icons module instead of fetching one
+function EmberUI.SetIconsModule(iconsModule)
+    Icons = iconsModule
+    iconsLoaded = true
+end
+
+-- Resolve an icon reference into an asset id string.
+-- Accepts: "rbxassetid://...", a plain icon name ("house"), or "pack:name" ("sfsymbols:HouseFill")
+local function resolveIcon(icon)
+    if not icon or icon == "" then
+        return nil
+    end
+
+    if type(icon) == "string" and icon:match("^rbxassetid://") then
+        return icon
+    end
+
+    local iconsModule = loadIcons()
+    if not iconsModule then
+        return nil
+    end
+
+    local ok, result = pcall(function()
+        return iconsModule.GetIcon(icon)
+    end)
+
+    if ok and type(result) == "string" then
+        return result
+    end
+
+    return nil
+end
+
+EmberUI.ResolveIcon = resolveIcon
 
 -- ===================== THEME =====================
 local Theme = {
@@ -93,6 +163,22 @@ function EmberUI.CreateWindow(title)
         Parent = PlayerGui,
     })
 
+    -- drop shadow behind the window
+    local shadow = create("ImageLabel", {
+        Name = "Shadow",
+        AnchorPoint = Vector2.new(0.5, 0.5),
+        Position = UDim2.new(0.5, 0, 0.5, 4),
+        Size = UDim2.new(1, 60, 1, 60),
+        BackgroundTransparency = 1,
+        Image = "rbxassetid://1316045217",
+        ImageColor3 = Color3.fromRGB(0, 0, 0),
+        ImageTransparency = 0.4,
+        ScaleType = Enum.ScaleType.Slice,
+        SliceCenter = Rect.new(10, 10, 118, 118),
+        ZIndex = 0,
+        Parent = screenGui,
+    })
+
     local mainFrame = create("Frame", {
         Name = "MainFrame",
         AnchorPoint = Vector2.new(0.5, 0.5),
@@ -103,6 +189,20 @@ function EmberUI.CreateWindow(title)
         ClipsDescendants = true,
         Parent = screenGui,
     }, { corner(10) })
+
+    -- keep the shadow following/sizing with the main frame
+    shadow.Size = UDim2.new(mainFrame.Size.X.Scale, mainFrame.Size.X.Offset + 60, mainFrame.Size.Y.Scale, mainFrame.Size.Y.Offset + 60)
+    mainFrame:GetPropertyChangedSignal("Position"):Connect(function()
+        shadow.Position = UDim2.new(mainFrame.Position.X.Scale, mainFrame.Position.X.Offset, mainFrame.Position.Y.Scale, mainFrame.Position.Y.Offset + 4)
+    end)
+    mainFrame:GetPropertyChangedSignal("Size"):Connect(function()
+        shadow.Size = UDim2.new(mainFrame.Size.X.Scale, mainFrame.Size.X.Offset + 60, mainFrame.Size.Y.Scale, mainFrame.Size.Y.Offset + 60)
+    end)
+    mainFrame:GetPropertyChangedSignal("AnchorPoint"):Connect(function()
+        shadow.AnchorPoint = mainFrame.AnchorPoint
+    end)
+    shadow.AnchorPoint = mainFrame.AnchorPoint
+    shadow.Position = UDim2.new(mainFrame.Position.X.Scale, mainFrame.Position.X.Offset, mainFrame.Position.Y.Scale, mainFrame.Position.Y.Offset + 4)
 
     -- optional background image holder (defaults to none -> solid black/theme color)
     local bgImage = create("ImageLabel", {
@@ -233,7 +333,18 @@ function EmberUI.CreateWindow(title)
         Parent = mainFrame,
     })
 
-    -- ===================== DRAGGING =====================
+    -- ===================== ENTRANCE ANIMATION =====================
+    local fullSize = mainFrame.Size
+    do
+        local targetSize = fullSize
+
+        mainFrame.Size = UDim2.new(targetSize.X.Scale * 0.85, targetSize.X.Offset * 0.85, targetSize.Y.Scale * 0.85, targetSize.Y.Offset * 0.85)
+        mainFrame.BackgroundTransparency = 1
+        shadow.ImageTransparency = 1
+
+        tween(mainFrame, { Size = targetSize, BackgroundTransparency = 0 }, 0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+        tween(shadow, { ImageTransparency = 0.4 }, 0.35)
+    end
     do
         local dragging = false
         local dragInput, mousePos, framePos
@@ -273,14 +384,85 @@ function EmberUI.CreateWindow(title)
         end)
     end
 
+    -- ===================== RESIZE HANDLE =====================
+    local resizeHandle = create("Frame", {
+        Name = "ResizeHandle",
+        AnchorPoint = Vector2.new(1, 1),
+        Position = UDim2.new(1, -4, 1, -4),
+        Size = UDim2.new(0, 16, 0, 16),
+        BackgroundTransparency = 1,
+        ZIndex = 5,
+        Parent = mainFrame,
+    })
+
+    create("TextLabel", {
+        Name = "Grip",
+        BackgroundTransparency = 1,
+        Size = UDim2.new(1, 0, 1, 0),
+        Font = Theme.FontBold,
+        Text = "⌟",
+        TextColor3 = Theme.SubText,
+        TextTransparency = 0.5,
+        TextSize = 16,
+        ZIndex = 5,
+        Parent = resizeHandle,
+    })
+
+    local minSize = Vector2.new(420, 280)
+
+    do
+        local resizing = false
+        local resizeInput, startMousePos, startSize
+
+        resizeHandle.InputBegan:Connect(function(input)
+            if not resizeHandle.Visible then return end
+            if input.UserInputType == Enum.UserInputType.MouseButton1
+                or input.UserInputType == Enum.UserInputType.Touch then
+                resizing = true
+                startMousePos = input.Position
+                startSize = mainFrame.AbsoluteSize
+
+                input.Changed:Connect(function()
+                    if input.UserInputState == Enum.UserInputState.End then
+                        resizing = false
+                    end
+                end)
+            end
+        end)
+
+        resizeHandle.InputChanged:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.MouseMovement
+                or input.UserInputType == Enum.UserInputType.Touch then
+                resizeInput = input
+            end
+        end)
+
+        UserInputService.InputChanged:Connect(function(input)
+            if input == resizeInput and resizing then
+                local delta = input.Position - startMousePos
+                local newWidth = math.max(minSize.X, startSize.X + delta.X)
+                local newHeight = math.max(minSize.Y, startSize.Y + delta.Y)
+                mainFrame.Size = UDim2.new(0, newWidth, 0, newHeight)
+            end
+        end)
+    end
+
     -- ===================== WINDOW TOGGLE / CLOSE =====================
     local isOpen = true
-    local openSize = UDim2.new(0.37, 0, 0.407, 0)
-    local closedSize = UDim2.new(0.37, 0, 0, 36)
+    local lastOpenSize = fullSize
 
     local function setOpen(open)
+        if open == isOpen then return end
         isOpen = open
-        tween(mainFrame, { Size = open and openSize or closedSize }, 0.25)
+
+        if open then
+            tween(mainFrame, { Size = lastOpenSize }, 0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+        else
+            lastOpenSize = mainFrame.Size
+            tween(mainFrame, { Size = UDim2.new(lastOpenSize.X.Scale, lastOpenSize.X.Offset, 0, 36) }, 0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+        end
+
+        resizeHandle.Visible = open
     end
 
     minimizeBtn.MouseButton1Click:Connect(function()
@@ -291,12 +473,13 @@ function EmberUI.CreateWindow(title)
         screenGui:Destroy()
     end)
 
-    -- toggle window visibility with Right Control by default
-    local toggleKey = Enum.KeyCode.RightControl
+    -- toggle window visibility with K by default
+    local toggleKey = Enum.KeyCode.K
     UserInputService.InputBegan:Connect(function(input, gameProcessed)
         if gameProcessed then return end
         if input.KeyCode == toggleKey then
             screenGui.Enabled = not screenGui.Enabled
+            shadow.Visible = screenGui.Enabled
         end
     end)
 
@@ -342,11 +525,13 @@ function EmberUI.CreateWindow(title)
             padding(6),
         })
 
-        if icon and icon ~= "" then
+        local resolvedIcon = resolveIcon(icon)
+        if resolvedIcon then
             create("ImageLabel", {
+                Name = "Icon",
                 Size = UDim2.new(0, 18, 0, 18),
                 BackgroundTransparency = 1,
-                Image = icon,
+                Image = resolvedIcon,
                 ImageColor3 = Theme.SubText,
                 Parent = tabLayout,
             })
