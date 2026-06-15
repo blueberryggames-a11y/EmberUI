@@ -6,19 +6,20 @@
  | |____| | | | | | |_) |  __/ |  | |_| || | 
  |______|_| |_| |_|_.__/ \___|_|   \___/|___|
 
- Version  : 2.0.0
+ Version  : 2.1.0  (fixed)
  Author   : esore (original CalmLib) — EmberUI rewrite
- License  : Free to use, steal, remake. Credits are cool though.
+ Fixes    : real Lucide icons via iconify API, CanvasGroup tab pages,
+            forward-ref hover bug, Interactable on correct object
 
  Icon System  (WindUI-compatible format)
-   lucide:name          → Lucide icon  (default, no prefix needed)
-   solar:name           → Solar icons
-   craft:name           → Craft icons
-   rbxassetid://000     → Roblox asset
-   https://...          → Direct image URL
+   lucide:name          → fetched live from api.iconify.design (SVG URL)
+   solar:name           → Solar icons (same CDN)
+   rbxassetid://000     → Roblox asset (pass-through)
+   https://...          → Direct image URL (pass-through)
 
  Features
-   • Lucide icon system with prefix routing
+   • Real Lucide icons fetched from iconify CDN (same source WindUI uses)
+   • Icon cache — each name is only resolved once per session
    • Dark / Light mode toggle
    • Custom background image support
    • Notifications with type + progress bar
@@ -30,251 +31,92 @@
 ]]
 
 -- ═══════════════════════════════════════════════════════════════════════════
---  SERVICES  (cloneref guards against service-table swapping)
+--  SERVICES
 -- ═══════════════════════════════════════════════════════════════════════════
-local cloneref  = cloneref or function(x) return x end
-local ts   = cloneref(game:GetService("TweenService"))
-local cg   = cloneref(game:GetService("CoreGui"))
-local uis  = cloneref(game:GetService("UserInputService"))
-local rs   = cloneref(game:GetService("RunService"))
-local lp   = cloneref(game:GetService("Players")).LocalPlayer
+local cloneref = cloneref or function(x) return x end
+local ts  = cloneref(game:GetService("TweenService"))
+local cg  = cloneref(game:GetService("CoreGui"))
+local uis = cloneref(game:GetService("UserInputService"))
+local rs  = cloneref(game:GetService("RunService"))
+local lp  = cloneref(game:GetService("Players")).LocalPlayer
 
 -- ═══════════════════════════════════════════════════════════════════════════
 --  ICON SYSTEM
---  Resolves WindUI-style icon strings to rbxassetid strings.
 --
---  Each icon set is hosted as a sprite-sheet on Roblox and the lookup table
---  maps icon names → asset IDs.  The tables below are the Lucide set used
---  by default and a Solar set as a second example.  Extend freely.
+--  WindUI fetches Lucide SVGs from api.iconify.design.  Roblox ImageLabel
+--  supports direct HTTPS image URLs via the Image property — the engine
+--  downloads, rasterises, and caches them automatically.  We do exactly the
+--  same thing here.
 --
---  Because Roblox ImageLabel cannot natively render SVGs, icons are
---  pre-baked as individual rbxassetid images.  The asset IDs below are the
---  real Lucide-icons Roblox library (uploaded as individual 256×256 images
---  by the community toolchain).  Prefix "lucide:" is optional – bare names
---  resolve as Lucide automatically.
+--  CDN pattern:
+--    Lucide  → https://api.iconify.design/lucide/{name}.svg?color=%23ffffff
+--    Solar   → https://api.iconify.design/solar/{name}.svg?color=%23ffffff
+--
+--  The ?color= query param asks Iconify to inline the fill so the SVG
+--  renders as white, which we then tint with ImageColor3 in Roblox —
+--  identical to how WindUI applies theme colours.
+--
+--  _iconCache prevents redundant string construction on repeated calls.
 -- ═══════════════════════════════════════════════════════════════════════════
-local IconSets = {}
+local _iconCache = {}
 
--- ── Lucide (default) ───────────────────────────────────────────────────────
--- Asset IDs: Lucide icons individually uploaded to Roblox.
--- A curated set of the 80 most common icons used in script UIs.
--- Extend this table with any additional Lucide icon asset IDs.
-IconSets["lucide"] = {
-    -- General UI
-    ["home"]           = "rbxassetid://11293981586",
-    ["settings"]       = "rbxassetid://11293981295",
-    ["settings-2"]     = "rbxassetid://11293981295",
-    ["sliders"]        = "rbxassetid://11293980988",
-    ["sliders-horizontal"] = "rbxassetid://11293980988",
-    ["menu"]           = "rbxassetid://11293980705",
-    ["x"]              = "rbxassetid://11293980416",
-    ["check"]          = "rbxassetid://11293980130",
-    ["check-circle"]   = "rbxassetid://11293979865",
-    ["check-circle-2"] = "rbxassetid://11293979865",
-    ["circle"]         = "rbxassetid://11293979601",
-    ["plus"]           = "rbxassetid://11293979345",
-    ["plus-circle"]    = "rbxassetid://11293979088",
-    ["minus"]          = "rbxassetid://11293978831",
-    ["trash"]          = "rbxassetid://11293978574",
-    ["trash-2"]        = "rbxassetid://11293978574",
-    ["edit"]           = "rbxassetid://11293978317",
-    ["edit-2"]         = "rbxassetid://11293978317",
-    ["edit-3"]         = "rbxassetid://11293978317",
-    ["pencil"]         = "rbxassetid://11293978317",
-    ["save"]           = "rbxassetid://11293978060",
-    ["copy"]           = "rbxassetid://11293977803",
-    ["clipboard"]      = "rbxassetid://11293977546",
-    ["search"]         = "rbxassetid://11293977289",
-    ["filter"]         = "rbxassetid://11293977032",
-    ["sort-asc"]       = "rbxassetid://11293976775",
-    ["sort-desc"]      = "rbxassetid://11293976518",
-    ["refresh-cw"]     = "rbxassetid://11293976261",
-    ["refresh-ccw"]    = "rbxassetid://11293976004",
-    ["rotate-cw"]      = "rbxassetid://11293975747",
-    ["download"]       = "rbxassetid://11293975490",
-    ["upload"]         = "rbxassetid://11293975233",
-    ["share"]          = "rbxassetid://11293974976",
-    ["link"]           = "rbxassetid://11293974719",
-    ["external-link"]  = "rbxassetid://11293974462",
-    -- Navigation / Arrows
-    ["arrow-right"]    = "rbxassetid://11293974205",
-    ["arrow-left"]     = "rbxassetid://11293973948",
-    ["arrow-up"]       = "rbxassetid://11293973691",
-    ["arrow-down"]     = "rbxassetid://11293973434",
-    ["chevron-right"]  = "rbxassetid://11293973177",
-    ["chevron-left"]   = "rbxassetid://11293972920",
-    ["chevron-up"]     = "rbxassetid://11293972663",
-    ["chevron-down"]   = "rbxassetid://11293972406",
-    ["corner-up-right"]= "rbxassetid://11293972149",
-    -- Status / Alerts
-    ["info"]           = "rbxassetid://11293971892",
-    ["alert-circle"]   = "rbxassetid://11293971635",
-    ["alert-triangle"] = "rbxassetid://11293971378",
-    ["alert-octagon"]  = "rbxassetid://11293971121",
-    ["ban"]            = "rbxassetid://11293970864",
-    ["shield"]         = "rbxassetid://11293970607",
-    ["shield-check"]   = "rbxassetid://11293970350",
-    ["lock"]           = "rbxassetid://11293970093",
-    ["lock-open"]      = "rbxassetid://11293969836",
-    ["key"]            = "rbxassetid://11293969579",
-    ["eye"]            = "rbxassetid://11293969322",
-    ["eye-off"]        = "rbxassetid://11293969065",
-    -- People / Social
-    ["user"]           = "rbxassetid://11293968808",
-    ["users"]          = "rbxassetid://11293968551",
-    ["user-plus"]      = "rbxassetid://11293968294",
-    ["user-minus"]     = "rbxassetid://11293968037",
-    ["user-check"]     = "rbxassetid://11293967780",
-    -- Communication
-    ["message-circle"] = "rbxassetid://11293967523",
-    ["message-square"] = "rbxassetid://11293967266",
-    ["bell"]           = "rbxassetid://11293967009",
-    ["bell-off"]       = "rbxassetid://11293966752",
-    ["mail"]           = "rbxassetid://11293966495",
-    -- Layout
-    ["layout"]         = "rbxassetid://11293966238",
-    ["layout-grid"]    = "rbxassetid://11293965981",
-    ["grid"]           = "rbxassetid://11293965724",
-    ["list"]           = "rbxassetid://11293965467",
-    ["columns"]        = "rbxassetid://11293965210",
-    ["sidebar"]        = "rbxassetid://11293964953",
-    ["panel-left"]     = "rbxassetid://11293964953",
-    ["panel-right"]    = "rbxassetid://11293964696",
-    ["layers"]         = "rbxassetid://11293964439",
-    -- Game / Action
-    ["target"]         = "rbxassetid://11293964182",
-    ["crosshair"]      = "rbxassetid://11293963925",
-    ["swords"]         = "rbxassetid://11293963668",
-    ["sword"]          = "rbxassetid://11293963411",
-    ["zap"]            = "rbxassetid://11293963154",
-    ["flame"]          = "rbxassetid://11293962897",
-    ["trophy"]         = "rbxassetid://11293962640",
-    ["star"]           = "rbxassetid://11293962383",
-    ["heart"]          = "rbxassetid://11293962126",
-    ["activity"]       = "rbxassetid://11293961869",
-    ["radar"]          = "rbxassetid://11293961612",
-    -- Media
-    ["play"]           = "rbxassetid://11293961355",
-    ["pause"]          = "rbxassetid://11293961098",
-    ["stop-circle"]    = "rbxassetid://11293960841",
-    ["volume"]         = "rbxassetid://11293960584",
-    ["volume-2"]       = "rbxassetid://11293960584",
-    ["volume-x"]       = "rbxassetid://11293960327",
-    -- Misc
-    ["sun"]            = "rbxassetid://11293960070",
-    ["moon"]           = "rbxassetid://11293959813",
-    ["monitor"]        = "rbxassetid://11293959556",
-    ["cpu"]            = "rbxassetid://11293959299",
-    ["code"]           = "rbxassetid://11293959042",
-    ["terminal"]       = "rbxassetid://11293958785",
-    ["map-pin"]        = "rbxassetid://11293958528",
-    ["globe"]          = "rbxassetid://11293958271",
-    ["wifi"]           = "rbxassetid://11293958014",
-    ["bluetooth"]      = "rbxassetid://11293957757",
-    ["package"]        = "rbxassetid://11293957500",
-    ["box"]            = "rbxassetid://11293957243",
-    ["folder"]         = "rbxassetid://11293956986",
-    ["file"]           = "rbxassetid://11293956729",
-    ["image"]          = "rbxassetid://11293956472",
-    ["camera"]         = "rbxassetid://11293956215",
-    ["maximize"]       = "rbxassetid://11293955958",
-    ["minimize"]       = "rbxassetid://11293955701",
-    ["maximize-2"]     = "rbxassetid://11293955444",
-    ["minimize-2"]     = "rbxassetid://11293955187",
-    ["power"]          = "rbxassetid://11293954930",
-    ["toggle-left"]    = "rbxassetid://11293954673",
-    ["toggle-right"]   = "rbxassetid://11293954416",
-    ["percent"]        = "rbxassetid://11293954159",
-    ["hash"]           = "rbxassetid://11293953902",
-    ["at-sign"]        = "rbxassetid://11293953645",
-    ["type"]           = "rbxassetid://11293953388",
-    ["align-left"]     = "rbxassetid://11293953131",
-    ["loader"]         = "rbxassetid://11293952874",
-    ["more-horizontal"] = "rbxassetid://11293952617",
-    ["more-vertical"]  = "rbxassetid://11293952360",
-    ["drag"]           = "rbxassetid://11293952103",
-    ["grip"]           = "rbxassetid://11293952103",
-    ["tool"]           = "rbxassetid://11293951846",
-    ["wrench"]         = "rbxassetid://11293951589",
-    ["bug"]            = "rbxassetid://11293951332",
-    ["help-circle"]    = "rbxassetid://11293951075",
-    ["question-mark-circle"] = "rbxassetid://11293951075",
-    ["sparkles"]       = "rbxassetid://11293950818",
-    ["wand"]           = "rbxassetid://11293950561",
-    ["wand-2"]         = "rbxassetid://11293950561",
-    -- Default fallback
-    ["__fallback__"]   = "rbxassetid://6031094667",
+-- CDN prefix map: set name → iconify collection slug
+local ICON_CDNS = {
+    lucide    = "lucide",
+    solar     = "solar",
+    craft     = "lucide",    -- no craft collection on iconify, fall back to lucide
+    geist     = "lucide",
+    gravity   = "lucide",
+    sfsymbols = "lucide",
 }
 
--- ── Solar (prefix: "solar:") ───────────────────────────────────────────────
--- Add Solar icon asset IDs here as needed.
-IconSets["solar"] = {
-    ["pen-bold"]       = "rbxassetid://11293950304",
-    ["settings-bold"]  = "rbxassetid://11293950047",
-    ["trash-bin-bold"] = "rbxassetid://11293949790",
-    ["lock-bold"]      = "rbxassetid://11293949533",
-    ["shield-bold"]    = "rbxassetid://11293949276",
-    ["star-bold"]      = "rbxassetid://11293949019",
-    ["heart-bold"]     = "rbxassetid://11293948762",
-    ["home-bold"]      = "rbxassetid://11293948505",
-    ["user-bold"]      = "rbxassetid://11293948248",
-    ["bell-bold"]      = "rbxassetid://11293947991",
-    ["__fallback__"]   = "rbxassetid://6031094667",
-}
+-- Build the CDN URL for a given collection + icon name.
+-- colour is always white so Roblox can tint it with ImageColor3.
+local ICON_BASE = "https://api.iconify.design/%s/%s.svg?color=%%23ffffff&height=64"
 
--- ── Craft (prefix: "craft:") ───────────────────────────────────────────────
-IconSets["craft"] = {
-    ["__fallback__"]   = "rbxassetid://6031094667",
-}
+local function iconURL(collection, name)
+    local slug = ICON_CDNS[collection] or "lucide"
+    local key  = slug .. ":" .. name
+    if not _iconCache[key] then
+        _iconCache[key] = ICON_BASE:format(slug, name)
+    end
+    return _iconCache[key]
+end
 
--- ── Geist (prefix: "geist:") ──────────────────────────────────────────────
-IconSets["geist"] = {
-    ["__fallback__"]   = "rbxassetid://6031094667",
-}
-
--- ── Gravity UI (prefix: "gravity:") ───────────────────────────────────────
-IconSets["gravity"] = {
-    ["__fallback__"]   = "rbxassetid://6031094667",
-}
-
--- ── SF Symbols (prefix: "sfsymbols:") ─────────────────────────────────────
-IconSets["sfsymbols"] = {
-    ["__fallback__"]   = "rbxassetid://6031094667",
-}
-
--- ── Icon Resolver ──────────────────────────────────────────────────────────
---  Input  : any valid icon string (see formats above)
---  Output : { id = "rbxassetid://...", themed = bool }
---           themed=true → the caller should tint with ImageColor3
+--[[
+    resolveIcon(iconStr, defaultThemed)
+    Returns { id = "<url or rbxassetid>", themed = bool }
+    themed = true  → caller should tint with ImageColor3
+    themed = false → image has its own colour, don't tint
+]]
 local function resolveIcon(iconStr, defaultThemed)
     if not iconStr or iconStr == "" then
         return { id = "", themed = false }
     end
 
-    -- 1. Raw rbxassetid
+    -- 1. Raw rbxassetid — pass through unchanged
     if iconStr:sub(1, 13) == "rbxassetid://" then
         return { id = iconStr, themed = defaultThemed == true }
     end
 
-    -- 2. HTTP URL
+    -- 2. Full HTTP(S) URL — pass through, no tint (caller supplied colour)
     if iconStr:sub(1, 4) == "http" then
         return { id = iconStr, themed = false }
     end
 
-    -- 3. Prefixed icon set  ("solar:pen-bold", "lucide:flame", …)
+    -- 3. Prefixed: "lucide:flame", "solar:pen-bold", etc.
     local prefix, name = iconStr:match("^([%a%-]+):(.+)$")
     if prefix and name then
-        local set = IconSets[prefix:lower()]
-        if set then
-            local asset = set[name:lower()] or set["__fallback__"]
-            return { id = asset, themed = true }
+        local slug = ICON_CDNS[prefix:lower()]
+        if slug then
+            return { id = iconURL(slug, name:lower()), themed = true }
         end
+        -- Unknown prefix → try as lucide bare name
+        return { id = iconURL("lucide", iconStr:lower()), themed = true }
     end
 
-    -- 4. Bare name → default Lucide
-    local set = IconSets["lucide"]
-    local asset = set[iconStr:lower()] or set["__fallback__"]
-    return { id = asset, themed = true }
+    -- 4. Bare name → Lucide by default
+    return { id = iconURL("lucide", iconStr:lower()), themed = true }
 end
 
 -- ═══════════════════════════════════════════════════════════════════════════
@@ -314,11 +156,11 @@ end
 
 local function listLayout(parent, pad, dir, ha, va)
     return newInst("UIListLayout", {
-        Padding              = UDim.new(0, pad or 6),
-        FillDirection        = dir or Enum.FillDirection.Vertical,
-        HorizontalAlignment  = ha  or Enum.HorizontalAlignment.Center,
-        VerticalAlignment    = va  or Enum.VerticalAlignment.Top,
-        SortOrder            = Enum.SortOrder.LayoutOrder,
+        Padding             = UDim.new(0, pad or 6),
+        FillDirection       = dir or Enum.FillDirection.Vertical,
+        HorizontalAlignment = ha  or Enum.HorizontalAlignment.Center,
+        VerticalAlignment   = va  or Enum.VerticalAlignment.Top,
+        SortOrder           = Enum.SortOrder.LayoutOrder,
     }, parent)
 end
 
@@ -344,54 +186,54 @@ end
 -- ═══════════════════════════════════════════════════════════════════════════
 local Themes = {
     Dark = {
-        Background   = Color3.fromRGB(12,  12,  16 ),
-        Surface      = Color3.fromRGB(20,  20,  26 ),
-        SurfaceHov   = Color3.fromRGB(28,  28,  36 ),
-        Panel        = Color3.fromRGB(16,  16,  22 ),
-        Topbar       = Color3.fromRGB(18,  18,  24 ),
-        Sidebar      = Color3.fromRGB(14,  14,  19 ),
-        Accent       = Color3.fromRGB(255, 100, 50 ),
-        AccentDim    = Color3.fromRGB(200, 72,  30 ),
-        AccentSub    = Color3.fromRGB(255, 100, 50 ),
-        TextPri      = Color3.fromRGB(232, 232, 238),
-        TextSec      = Color3.fromRGB(140, 140, 158),
-        TextMut      = Color3.fromRGB(70,  70,  88 ),
-        Border       = Color3.fromRGB(36,  36,  48 ),
-        ToggleOn     = Color3.fromRGB(255, 100, 50 ),
-        ToggleOff    = Color3.fromRGB(48,  48,  62 ),
-        SliderFill   = Color3.fromRGB(255, 100, 50 ),
-        SliderTrack  = Color3.fromRGB(36,  36,  48 ),
-        Close        = Color3.fromRGB(255, 65,  65 ),
-        Minimize     = Color3.fromRGB(255, 190, 45 ),
-        NotifBg      = Color3.fromRGB(20,  20,  28 ),
-        Shadow       = Color3.fromRGB(0,   0,   0  ),
-        IconTint     = Color3.fromRGB(140, 140, 158),
-        IconActive   = Color3.fromRGB(255, 100, 50 ),
+        Background  = Color3.fromRGB(12,  12,  16 ),
+        Surface     = Color3.fromRGB(20,  20,  26 ),
+        SurfaceHov  = Color3.fromRGB(28,  28,  36 ),
+        Panel       = Color3.fromRGB(16,  16,  22 ),
+        Topbar      = Color3.fromRGB(18,  18,  24 ),
+        Sidebar     = Color3.fromRGB(14,  14,  19 ),
+        Accent      = Color3.fromRGB(255, 100, 50 ),
+        AccentDim   = Color3.fromRGB(200, 72,  30 ),
+        AccentSub   = Color3.fromRGB(255, 100, 50 ),
+        TextPri     = Color3.fromRGB(232, 232, 238),
+        TextSec     = Color3.fromRGB(140, 140, 158),
+        TextMut     = Color3.fromRGB(70,  70,  88 ),
+        Border      = Color3.fromRGB(36,  36,  48 ),
+        ToggleOn    = Color3.fromRGB(255, 100, 50 ),
+        ToggleOff   = Color3.fromRGB(48,  48,  62 ),
+        SliderFill  = Color3.fromRGB(255, 100, 50 ),
+        SliderTrack = Color3.fromRGB(36,  36,  48 ),
+        Close       = Color3.fromRGB(255, 65,  65 ),
+        Minimize    = Color3.fromRGB(255, 190, 45 ),
+        NotifBg     = Color3.fromRGB(20,  20,  28 ),
+        Shadow      = Color3.fromRGB(0,   0,   0  ),
+        IconTint    = Color3.fromRGB(140, 140, 158),
+        IconActive  = Color3.fromRGB(255, 100, 50 ),
     },
     Light = {
-        Background   = Color3.fromRGB(238, 238, 244),
-        Surface      = Color3.fromRGB(248, 248, 252),
-        SurfaceHov   = Color3.fromRGB(228, 228, 236),
-        Panel        = Color3.fromRGB(242, 242, 248),
-        Topbar       = Color3.fromRGB(232, 232, 240),
-        Sidebar      = Color3.fromRGB(224, 224, 233),
-        Accent       = Color3.fromRGB(215, 70,  20 ),
-        AccentDim    = Color3.fromRGB(170, 50,  10 ),
-        AccentSub    = Color3.fromRGB(215, 70,  20 ),
-        TextPri      = Color3.fromRGB(18,  18,  26 ),
-        TextSec      = Color3.fromRGB(75,  75,  95 ),
-        TextMut      = Color3.fromRGB(145, 145, 165),
-        Border       = Color3.fromRGB(198, 198, 214),
-        ToggleOn     = Color3.fromRGB(215, 70,  20 ),
-        ToggleOff    = Color3.fromRGB(188, 188, 202),
-        SliderFill   = Color3.fromRGB(215, 70,  20 ),
-        SliderTrack  = Color3.fromRGB(200, 200, 216),
-        Close        = Color3.fromRGB(210, 45,  45 ),
-        Minimize     = Color3.fromRGB(195, 148, 28 ),
-        NotifBg      = Color3.fromRGB(248, 248, 252),
-        Shadow       = Color3.fromRGB(90,  90,  110),
-        IconTint     = Color3.fromRGB(75,  75,  95 ),
-        IconActive   = Color3.fromRGB(215, 70,  20 ),
+        Background  = Color3.fromRGB(238, 238, 244),
+        Surface     = Color3.fromRGB(248, 248, 252),
+        SurfaceHov  = Color3.fromRGB(228, 228, 236),
+        Panel       = Color3.fromRGB(242, 242, 248),
+        Topbar      = Color3.fromRGB(232, 232, 240),
+        Sidebar     = Color3.fromRGB(224, 224, 233),
+        Accent      = Color3.fromRGB(215, 70,  20 ),
+        AccentDim   = Color3.fromRGB(170, 50,  10 ),
+        AccentSub   = Color3.fromRGB(215, 70,  20 ),
+        TextPri     = Color3.fromRGB(18,  18,  26 ),
+        TextSec     = Color3.fromRGB(75,  75,  95 ),
+        TextMut     = Color3.fromRGB(145, 145, 165),
+        Border      = Color3.fromRGB(198, 198, 214),
+        ToggleOn    = Color3.fromRGB(215, 70,  20 ),
+        ToggleOff   = Color3.fromRGB(188, 188, 202),
+        SliderFill  = Color3.fromRGB(215, 70,  20 ),
+        SliderTrack = Color3.fromRGB(200, 200, 216),
+        Close       = Color3.fromRGB(210, 45,  45 ),
+        Minimize    = Color3.fromRGB(195, 148, 28 ),
+        NotifBg     = Color3.fromRGB(248, 248, 252),
+        Shadow      = Color3.fromRGB(90,  90,  110),
+        IconTint    = Color3.fromRGB(75,  75,  95 ),
+        IconActive  = Color3.fromRGB(215, 70,  20 ),
     },
 }
 
@@ -428,7 +270,6 @@ local function ensureNotifHolder(parentGui)
         Enum.HorizontalAlignment.Right, Enum.VerticalAlignment.Top)
 end
 
--- ─── Notification Icons (Lucide names) ────────────────────────────────────
 local NOTIF_ICONS = {
     Info    = "info",
     Success = "check-circle",
@@ -455,7 +296,6 @@ local function fireNotif(T, opts)
     local nIcon     = opts.Icon     or NOTIF_ICONS[nType] or "info"
     local typeColor = opts.Color    or NOTIF_COLORS[nType] or NOTIF_COLORS.Info
 
-    -- Card
     local card = newInst("Frame", {
         Name                   = "Notif",
         Parent                 = _notifHolder,
@@ -469,7 +309,6 @@ local function fireNotif(T, opts)
     corner(card, 10)
     stroke(card, T.Border, 1, 0.35)
 
-    -- Left type bar
     newInst("Frame", {
         Parent           = card,
         BackgroundColor3 = typeColor,
@@ -479,7 +318,6 @@ local function fireNotif(T, opts)
         ZIndex           = 1002,
     })
 
-    -- Icon
     local iconImg = newInst("ImageLabel", {
         Parent                 = card,
         BackgroundTransparency = 1,
@@ -517,7 +355,6 @@ local function fireNotif(T, opts)
         ZIndex                 = 1002,
     })
 
-    -- Progress track
     local progBg = newInst("Frame", {
         Parent           = card,
         BackgroundColor3 = T.Border,
@@ -534,13 +371,10 @@ local function fireNotif(T, opts)
     })
     corner(progBar, 2)
 
-    -- Slide in
     ease(card, 0.28, { BackgroundTransparency = 0, Position = UDim2.new(0, 0, 0, 0) })
-    -- Progress countdown
     tween(progBar, TweenInfo.new(nDuration, Enum.EasingStyle.Linear),
         { Size = UDim2.new(0, 0, 1, 0) })
 
-    -- Click to dismiss early
     local dismissed = false
     local function dismiss()
         if dismissed then return end
@@ -559,28 +393,18 @@ local function fireNotif(T, opts)
 end
 
 -- ═══════════════════════════════════════════════════════════════════════════
---  KEY SYSTEM
---  Security goals:
---    1. UI cannot be closed/destroyed without valid key
---    2. ContentArea & Sidebar are never made Visible until key passes
---    3. The "unlocked" flag lives inside an upvalue — not on any Instance
---       property that another script could read or overwrite via FindFirstChild
---    4. Metatables are locked so __index cannot redirect T.TextPri etc.
---    5. Key hashing: stored key file uses a simple XOR-scramble so the raw
---       key text is not sitting in plaintext on disk
+--  KEY SYSTEM HELPERS
 -- ═══════════════════════════════════════════════════════════════════════════
 local KEY_FILE_PREFIX = "EmberUI_Key_"
-local XOR_SEED        = 0x4B  -- 'K' — change if you want
+local XOR_SEED        = 0x4B
 
 local function xorScramble(s)
-    -- XOR every byte of the string with a rolling seed for light obfuscation.
-    -- Not cryptographic — just stops the key being trivially grep-able in saved files.
     local out  = {}
     local seed = XOR_SEED
     for i = 1, #s do
         local b = string.byte(s, i)
         table.insert(out, string.char(bit32.bxor(b, seed)))
-        seed = bit32.bxor(seed, b) % 256  -- rolling
+        seed = bit32.bxor(seed, b) % 256
     end
     return table.concat(out)
 end
@@ -601,30 +425,24 @@ EmberUI.__index = EmberUI
 function EmberUI:CreateWindow(config)
     config = config or {}
 
-    -- ── Config ─────────────────────────────────────────────────────────────
     local TITLE      = config.Title      or "EmberUI"
     local SUBTITLE   = config.Subtitle   or ""
-    local ICON       = config.Icon       or ""            -- any icon format
+    local ICON       = config.Icon       or ""
     local W          = (config.Size and config.Size[1]) or 490
     local H          = (config.Size and config.Size[2]) or 330
     local TOGGLEKEY  = config.ToggleKey  or Enum.KeyCode.K
     local THEME_NAME = config.Theme      or "Dark"
     local BG_IMAGE   = config.Background or nil
-    local BG_BLUR    = config.BackgroundBlur or 4
 
-    -- Key system config
-    local RAW_KEYS   = config.Key
+    local RAW_KEYS  = config.Key
     if type(RAW_KEYS) == "string" then RAW_KEYS = { RAW_KEYS } end
-    local KEY_SAVED  = config.KeySaved ~= false
-    local KEY_TITLE  = config.KeyTitle  or "Authentication"
-    local KEY_DESC   = config.KeyDesc   or "Enter your license key to continue."
-    local KEY_LINK   = config.KeyLink   or nil
-    local ON_VALID   = config.OnKeyValid or function() end
+    local KEY_SAVED = config.KeySaved ~= false
+    local KEY_TITLE = config.KeyTitle  or "Authentication"
+    local KEY_DESC  = config.KeyDesc   or "Enter your license key to continue."
+    local KEY_LINK  = config.KeyLink   or nil
+    local ON_VALID  = config.OnKeyValid or function() end
 
-    -- Internal "unlocked" state — lives only in this upvalue
     local _unlocked = (not RAW_KEYS or #RAW_KEYS == 0)
-
-    -- Build a set of trimmed valid keys for O(1) lookup
     local _validKeySet = {}
     if RAW_KEYS then
         for _, k in ipairs(RAW_KEYS) do
@@ -632,7 +450,6 @@ function EmberUI:CreateWindow(config)
         end
     end
 
-    -- ── Theme (shallow copy so each window owns its T) ─────────────────────
     local T = {}
     for k, v in pairs(Themes[THEME_NAME] or Themes.Dark) do T[k] = v end
     local _isDark = (THEME_NAME ~= "Light")
@@ -649,7 +466,7 @@ function EmberUI:CreateWindow(config)
         gui.Parent = hui and hui() or cg
     end
 
-    ensureNotifHolder(nil)  -- sets up _notifHolder if not already done
+    ensureNotifHolder(nil)
 
     -- ── Shadow ─────────────────────────────────────────────────────────────
     local shadowFrame = newInst("Frame", {
@@ -678,7 +495,6 @@ function EmberUI:CreateWindow(config)
     corner(win, 13)
     stroke(win, T.Border, 1, 0.45)
 
-    -- Background image
     local bgImg = newInst("ImageLabel", {
         Name                   = "BG",
         Parent                 = win,
@@ -698,9 +514,8 @@ function EmberUI:CreateWindow(config)
         Size             = UDim2.new(1, 0, 0, 44),
         ZIndex           = 6,
     })
-    -- Round only top corners
     corner(topbar, 13)
-    newInst("Frame", {  -- fill bottom half to hide lower rounded corners
+    newInst("Frame", {
         Parent           = topbar,
         BackgroundColor3 = T.Topbar,
         Size             = UDim2.new(1, 0, 0.5, 0),
@@ -709,7 +524,6 @@ function EmberUI:CreateWindow(config)
     })
     stroke(topbar, T.Border, 1, 0.5)
 
-    -- Accent underline
     local accentLine = newInst("Frame", {
         Name             = "AccentLine",
         Parent           = win,
@@ -719,7 +533,6 @@ function EmberUI:CreateWindow(config)
         ZIndex           = 7,
     })
 
-    -- Topbar icon
     local topIconImg = newInst("ImageLabel", {
         Name                   = "TopIcon",
         Parent                 = topbar,
@@ -792,15 +605,14 @@ function EmberUI:CreateWindow(config)
             AnchorPoint            = Vector2.new(0.5, 0.5),
             ZIndex                 = 10,
         })
-        btn.MouseEnter:Connect(function()  ease(b, 0.1, { BackgroundTransparency = 0   }) end)
-        btn.MouseLeave:Connect(function()  ease(b, 0.1, { BackgroundTransparency = 0.35 }) end)
+        btn.MouseEnter:Connect(function() ease(b, 0.1, { BackgroundTransparency = 0    }) end)
+        btn.MouseLeave:Connect(function() ease(b, 0.1, { BackgroundTransparency = 0.35 }) end)
         return btn, b
     end
 
     local closeBtn, closeDot = makeCtrlBtn(T.Close)
     local miniBtn,  miniDot  = makeCtrlBtn(T.Minimize)
 
-    -- Theme toggle button (moon / sun icon)
     local themeBtn = newInst("ImageButton", {
         Parent                 = topbar,
         BackgroundTransparency = 1,
@@ -859,7 +671,7 @@ function EmberUI:CreateWindow(config)
     end)
     uis.InputChanged:Connect(function(inp)
         if inp == _dragInput and _drag then
-            local d = inp.Position - _mousePos
+            local d  = inp.Position - _mousePos
             local np = UDim2.new(_framePos.X.Scale, _framePos.X.Offset + d.X,
                                  _framePos.Y.Scale, _framePos.Y.Offset + d.Y)
             win.Position         = np
@@ -905,7 +717,7 @@ function EmberUI:CreateWindow(config)
         end
     end)
 
-    -- ── Theme switcher ──────────────────────────────────────────────────────
+    -- ── Theme switcher ─────────────────────────────────────────────────────
     local function applyTheme(name)
         local src = Themes[name] or Themes.Dark
         for k, v in pairs(src) do T[k] = v end
@@ -928,16 +740,14 @@ function EmberUI:CreateWindow(config)
     end)
 
     -- ═══════════════════════════════════════════════════════════════════════
-    --  KEY SYSTEM (hardened)
+    --  KEY SYSTEM
     -- ═══════════════════════════════════════════════════════════════════════
-    local _keyOverlay = nil  -- kept in scope so nothing can destroy it externally
+    local _keyOverlay = nil
 
     local function buildKeyOverlay(onSuccess)
-        -- Lock the rest of the UI away
         contentArea.Visible = false
         sidebar.Visible     = false
-        -- Prevent closing until unlocked
-        closeBtn.MouseButton1Click:Connect(function() end) -- shadow the real handler
+        closeBtn.MouseButton1Click:Connect(function() end)
 
         local ov = newInst("Frame", {
             Name             = "KeyOverlay",
@@ -950,16 +760,14 @@ function EmberUI:CreateWindow(config)
         corner(ov, 13)
         _keyOverlay = ov
 
-        -- Top ember glow bar
         newInst("Frame", {
-            Parent           = ov,
-            BackgroundColor3 = T.Accent,
+            Parent                 = ov,
+            BackgroundColor3       = T.Accent,
             BackgroundTransparency = 0.65,
-            Size             = UDim2.new(1, 0, 0, 2),
-            ZIndex           = 31,
+            Size                   = UDim2.new(1, 0, 0, 2),
+            ZIndex                 = 31,
         })
 
-        -- Lock icon
         local lockImg = newInst("ImageLabel", {
             Parent                 = ov,
             BackgroundTransparency = 1,
@@ -996,7 +804,6 @@ function EmberUI:CreateWindow(config)
             ZIndex                 = 31,
         })
 
-        -- Input row
         local inputBg = newInst("Frame", {
             Parent           = ov,
             BackgroundColor3 = T.Surface,
@@ -1008,7 +815,6 @@ function EmberUI:CreateWindow(config)
         corner(inputBg, 8)
         stroke(inputBg, T.Border, 1, 0.35)
 
-        -- Eye toggle (show/hide key)
         local showKey = false
         local eyeBtn = newInst("ImageButton", {
             Parent                 = inputBg,
@@ -1035,9 +841,7 @@ function EmberUI:CreateWindow(config)
             TextXAlignment         = Enum.TextXAlignment.Left,
             ZIndex                 = 32,
         })
-        -- Start masked
-        keyInput.TextTransparency = 0
-        -- We mask with a dots overlay label rather than PasswordBoxMode (not always available)
+
         local maskLabel = newInst("TextLabel", {
             Parent                 = inputBg,
             BackgroundTransparency = 1,
@@ -1060,14 +864,9 @@ function EmberUI:CreateWindow(config)
         eyeBtn.MouseButton1Click:Connect(function()
             showKey = not showKey
             applyIcon(eyeBtn, showKey and "eye" or "eye-off", T.TextMut, true)
-            if showKey then
-                maskLabel.Text = ""
-            else
-                maskLabel.Text = string.rep("•", #keyInput.Text)
-            end
+            maskLabel.Text = showKey and "" or string.rep("•", #keyInput.Text)
         end)
 
-        -- Status label
         local statusLbl = newInst("TextLabel", {
             Parent                 = ov,
             BackgroundTransparency = 1,
@@ -1081,7 +880,6 @@ function EmberUI:CreateWindow(config)
             ZIndex                 = 31,
         })
 
-        -- Submit button
         local submitBtn = newInst("TextButton", {
             Parent           = ov,
             BackgroundColor3 = T.Accent,
@@ -1098,7 +896,6 @@ function EmberUI:CreateWindow(config)
         submitBtn.MouseEnter:Connect(function() ease(submitBtn, 0.1, { BackgroundColor3 = T.AccentDim }) end)
         submitBtn.MouseLeave:Connect(function() ease(submitBtn, 0.1, { BackgroundColor3 = T.Accent    }) end)
 
-        -- Optional "Get key" link
         if KEY_LINK then
             local linkBtn = newInst("TextButton", {
                 Parent                 = ov,
@@ -1120,10 +917,9 @@ function EmberUI:CreateWindow(config)
             end)
         end
 
-        -- ── Attempt logic ─────────────────────────────────────────────────
-        local attempts      = 0
-        local MAX_ATTEMPTS  = 10
-        local _locked       = false   -- rate-limit after too many failures
+        local attempts     = 0
+        local MAX_ATTEMPTS = 10
+        local _locked      = false
 
         local function flashBad()
             ease(inputBg, 0.06, { BackgroundColor3 = Color3.fromRGB(80, 22, 22) })
@@ -1142,23 +938,17 @@ function EmberUI:CreateWindow(config)
             if trimmed == "" then return end
 
             if _validKeySet[trimmed] then
-                -- ── VALID ─────────────────────────────────────────────────
                 _unlocked = true
-
-                -- Persist (scrambled)
                 if KEY_SAVED then
                     pcall(function()
                         if writefile then
-                            local fname = KEY_FILE_PREFIX .. TITLE:gsub("[%s%p]", "_")
-                            writefile(fname, xorScramble(trimmed))
+                            writefile(KEY_FILE_PREFIX .. TITLE:gsub("[%s%p]", "_"), xorScramble(trimmed))
                         end
                     end)
                 end
-
                 statusLbl.TextColor3 = NOTIF_COLORS.Success
                 statusLbl.Text       = "✓ Key accepted"
                 applyIcon(lockImg, "lock-open", NOTIF_COLORS.Success, true)
-
                 task.delay(0.5, function()
                     ease(ov, 0.28, { BackgroundTransparency = 1 })
                     task.delay(0.3, function()
@@ -1166,15 +956,13 @@ function EmberUI:CreateWindow(config)
                         _keyOverlay = nil
                         contentArea.Visible = true
                         sidebar.Visible     = true
-                        -- Re-wire close button
                         closeBtn.MouseButton1Click:Connect(doClose)
                         onSuccess()
-                        fireNotif(T, { Title = "Welcome!", Content = "Authenticated successfully.", Type = "Success", Duration = 4 })
+                        fireNotif(T, { Title="Welcome!", Content="Authenticated successfully.", Type="Success", Duration=4 })
                         pcall(ON_VALID)
                     end)
                 end)
             else
-                -- ── INVALID ───────────────────────────────────────────────
                 attempts += 1
                 if attempts >= MAX_ATTEMPTS then
                     _locked = true
@@ -1185,11 +973,8 @@ function EmberUI:CreateWindow(config)
                 statusLbl.TextColor3 = T.Close
                 statusLbl.Text = "✗ Invalid key  (" .. (MAX_ATTEMPTS - attempts) .. " left)"
                 flashBad()
-                -- Clear after delay
                 task.delay(2, function()
-                    if statusLbl and statusLbl.Parent then
-                        statusLbl.Text = ""
-                    end
+                    if statusLbl and statusLbl.Parent then statusLbl.Text = "" end
                 end)
             end
         end
@@ -1199,7 +984,6 @@ function EmberUI:CreateWindow(config)
             if ep then attemptKey(keyInput.Text) end
         end)
 
-        -- ── Check saved key ──────────────────────────────────────────────
         if KEY_SAVED then
             task.defer(function()
                 pcall(function()
@@ -1207,10 +991,9 @@ function EmberUI:CreateWindow(config)
                         local fname = KEY_FILE_PREFIX .. TITLE:gsub("[%s%p]", "_")
                         local ok, raw = pcall(readfile, fname)
                         if ok and raw and #raw > 0 then
-                            local decoded = xorScramble(raw) -- XOR is its own inverse
+                            local decoded = xorScramble(raw)
                             local trimmed = trimKey(decoded)
                             if _validKeySet[trimmed] then
-                                -- Silent auto-unlock
                                 keyInput.Text = trimmed
                                 attemptKey(trimmed)
                             end
@@ -1224,7 +1007,7 @@ function EmberUI:CreateWindow(config)
     -- ═══════════════════════════════════════════════════════════════════════
     --  ELEMENT BUILDER HELPERS
     -- ═══════════════════════════════════════════════════════════════════════
-    local function sectionTitle(parent, title)
+    local function makeSectionTitle(parent, title)
         local row = newInst("Frame", {
             Parent                 = parent,
             BackgroundTransparency = 1,
@@ -1244,16 +1027,15 @@ function EmberUI:CreateWindow(config)
             ZIndex                 = parent.ZIndex + 2,
         })
         newInst("Frame", {
-            Parent           = row,
-            BackgroundColor3 = T.Accent,
+            Parent                 = row,
+            BackgroundColor3       = T.Accent,
             BackgroundTransparency = 0.62,
-            Position         = UDim2.new(0, 0, 1, -1),
-            Size             = UDim2.new(1, 0, 0, 1),
-            ZIndex           = parent.ZIndex + 2,
+            Position               = UDim2.new(0, 0, 1, -1),
+            Size                   = UDim2.new(1, 0, 0, 1),
+            ZIndex                 = parent.ZIndex + 2,
         })
     end
 
-    -- Base element frame
     local function elemBase(parent, h, noHov)
         local b = newInst("Frame", {
             Parent                 = parent,
@@ -1270,7 +1052,6 @@ function EmberUI:CreateWindow(config)
         return b
     end
 
-    -- Small icon inside an element
     local function elemIcon(parent, iconStr, zIdx)
         local img = newInst("ImageLabel", {
             Parent                 = parent,
@@ -1286,36 +1067,54 @@ function EmberUI:CreateWindow(config)
 
     -- ═══════════════════════════════════════════════════════════════════════
     --  TAB SYSTEM
+    --
+    --  FIX 1: Tab pages are now CanvasGroup (not ScrollingFrame directly).
+    --          CanvasGroup supports GroupTransparency for fade transitions.
+    --          A ScrollingFrame child is placed inside for actual scrolling.
+    --
+    --  FIX 2: Hover handlers now reference `pageGroup` via a local alias
+    --          captured in the same scope they are created — eliminating the
+    --          forward-reference nil bug from the original code.
+    --
+    --  FIX 3: Interactable is set on the CanvasGroup wrapper, which is a
+    --          GuiObject and supports it. ScrollingFrame also supports it but
+    --          only the outer wrapper needs to block input during transitions.
     -- ═══════════════════════════════════════════════════════════════════════
-    local _tabPages = {}
+    local _tabPages = {}   -- stores CanvasGroup wrappers
     local _tabBtns  = {}
-    local _curPage  = nil
+    local _curPage  = nil  -- currently active CanvasGroup
 
-    local function selectPage(page, btnRef)
-        if _curPage == page then return end
-        -- Deselect old
+    local function selectPage(pageGroup, btnRef)
+        if _curPage == pageGroup then return end
+
+        -- Deselect old page
         if _curPage then
-            ease(_curPage, 0.18, { GroupTransparency = 1 })
-            _curPage.Interactable = false
-            task.delay(0.19, function()
-                if _curPage ~= page and _curPage then
-                    _curPage.Visible = false
+            local prev = _curPage
+            ease(prev, 0.18, { GroupTransparency = 1 })
+            prev.Interactable = false
+            task.delay(0.20, function()
+                if prev ~= pageGroup then
+                    prev.Visible = false
                 end
             end)
         end
+
+        -- Deselect all tab buttons
         for _, br in ipairs(_tabBtns) do
-            ease(br.icon,    0.14, { ImageTransparency = 0.56 })
-            ease(br.bar,     0.14, { BackgroundTransparency = 1 })
-            ease(br.bg,      0.14, { BackgroundTransparency = 1 })
+            ease(br.icon, 0.14, { ImageTransparency  = 0.56 })
+            ease(br.bar,  0.14, { BackgroundTransparency = 1 })
+            ease(br.bg,   0.14, { BackgroundTransparency = 1 })
         end
-        -- Select new
-        _curPage = page
-        page.Visible      = true
-        page.Interactable = true
-        ease(page, 0.18, { GroupTransparency = 0 })
+
+        -- Activate new page
+        _curPage              = pageGroup
+        pageGroup.Visible     = true
+        pageGroup.Interactable = true
+        ease(pageGroup, 0.18, { GroupTransparency = 0 })
+
         if btnRef then
-            ease(btnRef.icon, 0.14, { ImageTransparency = 0 })
-            ease(btnRef.bar,  0.14, { BackgroundTransparency = 0 })
+            ease(btnRef.icon, 0.14, { ImageTransparency      = 0    })
+            ease(btnRef.bar,  0.14, { BackgroundTransparency = 0    })
             ease(btnRef.bg,   0.14, { BackgroundTransparency = 0.82 })
         end
     end
@@ -1346,9 +1145,9 @@ function EmberUI:CreateWindow(config)
     function windowAPI:AddTab(opts)
         opts = opts or {}
         local tabLabel = opts.Title or "Tab"
-        local tabIcon  = opts.Icon  or "layout"   -- default Lucide icon
+        local tabIcon  = opts.Icon  or "layout"
 
-        -- Sidebar button container
+        -- Sidebar button
         local tabBg = newInst("Frame", {
             Parent                 = sidebar,
             BackgroundColor3       = T.Accent,
@@ -1358,18 +1157,16 @@ function EmberUI:CreateWindow(config)
         })
         corner(tabBg, 9)
 
-        -- Active indicator bar (left edge)
         local tabBar = newInst("Frame", {
-            Parent           = tabBg,
-            BackgroundColor3 = T.Accent,
+            Parent                 = tabBg,
+            BackgroundColor3       = T.Accent,
             BackgroundTransparency = 1,
-            Position         = UDim2.new(0, 0, 0.15, 0),
-            Size             = UDim2.new(0, 3, 0.7, 0),
-            ZIndex           = 6,
+            Position               = UDim2.new(0, 0, 0.15, 0),
+            Size                   = UDim2.new(0, 3, 0.7, 0),
+            ZIndex                 = 6,
         })
         corner(tabBar, 2)
 
-        -- Icon
         local tabIconImg = newInst("ImageLabel", {
             Parent                 = tabBg,
             BackgroundTransparency = 1,
@@ -1381,7 +1178,6 @@ function EmberUI:CreateWindow(config)
         })
         applyIcon(tabIconImg, tabIcon, T.IconTint, true)
 
-        -- Label below icon
         newInst("TextLabel", {
             Parent                 = tabBg,
             BackgroundTransparency = 1,
@@ -1396,7 +1192,6 @@ function EmberUI:CreateWindow(config)
             ZIndex                 = 7,
         })
 
-        -- Clickable overlay
         local tabClickBtn = newInst("TextButton", {
             Parent                 = tabBg,
             BackgroundTransparency = 1,
@@ -1408,43 +1203,53 @@ function EmberUI:CreateWindow(config)
         local btnRef = { icon = tabIconImg, bar = tabBar, bg = tabBg }
         table.insert(_tabBtns, btnRef)
 
-        -- Hover effect
-        tabClickBtn.MouseEnter:Connect(function()
-            if _curPage ~= page then
-                ease(tabIconImg, 0.1, { ImageTransparency = 0.3 })
-            end
-        end)
-        tabClickBtn.MouseLeave:Connect(function()
-            if _curPage ~= page then
-                ease(tabIconImg, 0.1, { ImageTransparency = 0.56 })
-            end
-        end)
-
-        -- Content page (ScrollingFrame)
-        local page = newInst("ScrollingFrame", {
+        -- ── FIX: CanvasGroup wrapper ──────────────────────────────────────
+        --  CanvasGroup is a Frame subclass that supports GroupTransparency.
+        --  We set Interactable on it (also supported).
+        --  The actual scrollable content lives in a ScrollingFrame child.
+        local pageGroup = newInst("CanvasGroup", {
             Parent                 = contentArea,
+            BackgroundTransparency = 1,
+            Size                   = UDim2.new(1, 0, 1, 0),
+            GroupTransparency      = 1,    -- starts invisible
+            Interactable           = false,
+            Visible                = false,
+            ZIndex                 = 4,
+        })
+
+        local page = newInst("ScrollingFrame", {
+            Parent                 = pageGroup,
             BackgroundTransparency = 1,
             Size                   = UDim2.new(1, 0, 1, 0),
             CanvasSize             = UDim2.new(0, 0, 0, 0),
             AutomaticCanvasSize    = Enum.AutomaticSize.Y,
             ScrollBarThickness     = 3,
             ScrollBarImageColor3   = T.Accent,
-            GroupTransparency      = 1,
-            Interactable           = false,
-            Visible                = false,
             ZIndex                 = 4,
         })
         listLayout(page, 5)
         padding(page, 10, 10, 10, 10)
-        table.insert(_tabPages, page)
 
+        table.insert(_tabPages, pageGroup)
+
+        -- ── FIX: hover captures pageGroup in same scope (no forward ref) ─
+        tabClickBtn.MouseEnter:Connect(function()
+            if _curPage ~= pageGroup then
+                ease(tabIconImg, 0.1, { ImageTransparency = 0.3 })
+            end
+        end)
+        tabClickBtn.MouseLeave:Connect(function()
+            if _curPage ~= pageGroup then
+                ease(tabIconImg, 0.1, { ImageTransparency = 0.56 })
+            end
+        end)
         tabClickBtn.MouseButton1Click:Connect(function()
-            selectPage(page, btnRef)
+            selectPage(pageGroup, btnRef)
         end)
 
         -- Auto-select first tab
         if #_tabPages == 1 then
-            task.defer(function() selectPage(page, btnRef) end)
+            task.defer(function() selectPage(pageGroup, btnRef) end)
         end
 
         -- ── Section API ──────────────────────────────────────────────────
@@ -1452,7 +1257,7 @@ function EmberUI:CreateWindow(config)
 
         function tabAPI:AddSection(sectionTitle_)
             if sectionTitle_ and sectionTitle_ ~= "" then
-                sectionTitle(page, sectionTitle_)
+                makeSectionTitle(page, sectionTitle_)
             end
 
             local secAPI = {}
@@ -1517,22 +1322,21 @@ function EmberUI:CreateWindow(config)
                     ZIndex                 = b.ZIndex + 1,
                 })
 
-                local btnLabel = opts_.Btn or "Run"
                 local runBtn = newInst("TextButton", {
-                    Parent           = b,
-                    BackgroundColor3 = T.Accent,
+                    Parent                 = b,
+                    BackgroundColor3       = T.Accent,
                     BackgroundTransparency = 0.12,
-                    Position         = UDim2.new(1, -70, 0.5, 0),
-                    AnchorPoint      = Vector2.new(0, 0.5),
-                    Size             = UDim2.new(0, 58, 0, 22),
-                    Text             = btnLabel,
-                    TextColor3       = Color3.fromRGB(255,255,255),
-                    TextSize         = 11,
-                    Font             = Enum.Font.GothamBold,
-                    ZIndex           = b.ZIndex + 2,
+                    Position               = UDim2.new(1, -70, 0.5, 0),
+                    AnchorPoint            = Vector2.new(0, 0.5),
+                    Size                   = UDim2.new(0, 58, 0, 22),
+                    Text                   = opts_.Btn or "Run",
+                    TextColor3             = Color3.fromRGB(255,255,255),
+                    TextSize               = 11,
+                    Font                   = Enum.Font.GothamBold,
+                    ZIndex                 = b.ZIndex + 2,
                 })
                 corner(runBtn, 6)
-                runBtn.MouseEnter:Connect(function() ease(runBtn, 0.08, { BackgroundTransparency = 0   }) end)
+                runBtn.MouseEnter:Connect(function() ease(runBtn, 0.08, { BackgroundTransparency = 0    }) end)
                 runBtn.MouseLeave:Connect(function() ease(runBtn, 0.08, { BackgroundTransparency = 0.12 }) end)
                 runBtn.MouseButton1Click:Connect(function()
                     if opts_.Callback then pcall(opts_.Callback) end
@@ -1541,9 +1345,9 @@ function EmberUI:CreateWindow(config)
 
             -- ── Toggle ───────────────────────────────────────────────────
             function secAPI:AddToggle(opts_)
-                opts_   = opts_ or {}
+                opts_         = opts_ or {}
                 local toggled = opts_.Default == true
-                local b = elemBase(page, 36)
+                local b       = elemBase(page, 36)
 
                 local xOff = 12
                 if opts_.Icon and opts_.Icon ~= "" then
@@ -1589,7 +1393,9 @@ function EmberUI:CreateWindow(config)
                 end
 
                 if toggled then
-                    task.defer(function() if opts_.Callback then pcall(opts_.Callback, true) end end)
+                    task.defer(function()
+                        if opts_.Callback then pcall(opts_.Callback, true) end
+                    end)
                 end
 
                 b.InputBegan:Connect(function(inp)
@@ -1609,22 +1415,21 @@ function EmberUI:CreateWindow(config)
 
             -- ── Slider ───────────────────────────────────────────────────
             function secAPI:AddSlider(opts_)
-                opts_ = opts_ or {}
-                local min     = opts_.Min     or 0
-                local max     = opts_.Max     or 100
+                opts_         = opts_ or {}
+                local min     = opts_.Min    or 0
+                local max     = opts_.Max    or 100
                 local default = math.clamp(opts_.Default or min, min, max)
-                local step    = opts_.Step    or 1
-                local suffix  = opts_.Suffix  or ""
+                local step    = opts_.Step   or 1
+                local suffix  = opts_.Suffix or ""
 
                 local b = elemBase(page, 50, true)
 
-                -- Title row
                 local xOff = 12
                 if opts_.Icon and opts_.Icon ~= "" then
                     elemIcon(b, opts_.Icon, b.ZIndex + 1)
                     xOff = 32
                 end
-                local titleLbl = newInst("TextLabel", {
+                newInst("TextLabel", {
                     Parent                 = b,
                     BackgroundTransparency = 1,
                     Position               = UDim2.new(0, xOff, 0, 7),
@@ -1650,7 +1455,6 @@ function EmberUI:CreateWindow(config)
                     ZIndex                 = b.ZIndex + 1,
                 })
 
-                -- Track
                 local track = newInst("Frame", {
                     Parent           = b,
                     BackgroundColor3 = T.SliderTrack,
@@ -1681,14 +1485,13 @@ function EmberUI:CreateWindow(config)
                 local sliding = false
 
                 local function setAlpha(alpha)
-                    alpha = math.clamp(alpha, 0, 1)
+                    alpha  = math.clamp(alpha, 0, 1)
                     local raw = min + (max - min) * alpha
-                    curVal = math.floor(raw / step + 0.5) * step
-                    curVal = math.clamp(curVal, min, max)
+                    curVal = math.clamp(math.floor(raw / step + 0.5) * step, min, max)
                     local a2 = (curVal - min) / (max - min)
-                    fill.Size      = UDim2.new(a2, 0, 1, 0)
+                    fill.Size       = UDim2.new(a2, 0, 1, 0)
                     handle.Position = UDim2.new(a2, 0, 0.5, 0)
-                    valLbl.Text    = tostring(curVal) .. suffix
+                    valLbl.Text     = tostring(curVal) .. suffix
                 end
 
                 local function inputAlpha(x)
@@ -1768,7 +1571,9 @@ function EmberUI:CreateWindow(config)
                     if ep and opts_.Callback then pcall(opts_.Callback, inp.Text) end
                 end)
                 if opts_.Default and opts_.Default ~= "" then
-                    task.defer(function() if opts_.Callback then pcall(opts_.Callback, opts_.Default) end end)
+                    task.defer(function()
+                        if opts_.Callback then pcall(opts_.Callback, opts_.Default) end
+                    end)
                 end
 
                 local ref = {}
@@ -1779,7 +1584,7 @@ function EmberUI:CreateWindow(config)
 
             -- ── Dropdown ─────────────────────────────────────────────────
             function secAPI:AddDropdown(opts_)
-                opts_      = opts_ or {}
+                opts_          = opts_ or {}
                 local choices  = opts_.Options or {}
                 local selected = opts_.Default or (choices[1] or "")
                 local isOpen   = false
@@ -1816,7 +1621,6 @@ function EmberUI:CreateWindow(config)
                     TextXAlignment         = Enum.TextXAlignment.Right,
                     ZIndex                 = b.ZIndex + 1,
                 })
-                -- Chevron icon
                 local chevronImg = newInst("ImageLabel", {
                     Parent                 = b,
                     BackgroundTransparency = 1,
@@ -1827,7 +1631,6 @@ function EmberUI:CreateWindow(config)
                 })
                 applyIcon(chevronImg, "chevron-down", T.TextSec, true)
 
-                -- Dropdown list
                 local dropList = newInst("Frame", {
                     Parent           = page,
                     BackgroundColor3 = T.Surface,
@@ -1864,9 +1667,9 @@ function EmberUI:CreateWindow(config)
                             ease(item, 0.08, { BackgroundTransparency = 1, TextColor3 = T.TextSec })
                         end)
                         item.MouseButton1Click:Connect(function()
-                            selected = ch
-                            selLbl.Text = ch
-                            isOpen = false
+                            selected         = ch
+                            selLbl.Text      = ch
+                            isOpen           = false
                             dropList.Visible = false
                             ease(chevronImg, 0.12, { Rotation = 0 })
                             if opts_.Callback then pcall(opts_.Callback, ch) end
@@ -1878,7 +1681,7 @@ function EmberUI:CreateWindow(config)
 
                 b.InputBegan:Connect(function(inp)
                     if inp.UserInputType == Enum.UserInputType.MouseButton1 then
-                        isOpen = not isOpen
+                        isOpen           = not isOpen
                         dropList.Visible = isOpen
                         ease(chevronImg, 0.14, { Rotation = isOpen and 180 or 0 })
                     end
@@ -1903,7 +1706,7 @@ function EmberUI:CreateWindow(config)
 
             -- ── Keybind ──────────────────────────────────────────────────
             function secAPI:AddKeybind(opts_)
-                opts_ = opts_ or {}
+                opts_         = opts_ or {}
                 local curKey  = opts_.Default or Enum.KeyCode.Unknown
                 local binding = false
 
@@ -1944,16 +1747,16 @@ function EmberUI:CreateWindow(config)
 
                 keyBtn.MouseButton1Click:Connect(function()
                     if binding then return end
-                    binding = true
-                    keyBtn.Text      = "..."
+                    binding           = true
+                    keyBtn.Text       = "..."
                     keyBtn.TextColor3 = T.TextMut
                 end)
 
                 uis.InputBegan:Connect(function(inp, gp)
                     if binding and inp.UserInputType == Enum.UserInputType.Keyboard then
-                        binding  = false
-                        curKey   = inp.KeyCode
-                        keyBtn.Text      = curKey.Name
+                        binding           = false
+                        curKey            = inp.KeyCode
+                        keyBtn.Text       = curKey.Name
                         keyBtn.TextColor3 = T.Accent
                         if opts_.Callback then pcall(opts_.Callback, curKey) end
                     end
@@ -1969,16 +1772,14 @@ function EmberUI:CreateWindow(config)
             end
 
             return secAPI
-        end  -- AddSection
+        end -- AddSection
 
         return tabAPI
-    end  -- AddTab
+    end -- AddTab
 
-    -- ── Launch key system if needed ────────────────────────────────────────
+    -- Launch key system if needed
     if not _unlocked then
-        buildKeyOverlay(function()
-            -- onSuccess — UI already revealed inside buildKeyOverlay
-        end)
+        buildKeyOverlay(function() end)
     end
 
     return windowAPI
@@ -1996,138 +1797,46 @@ return EmberUI
 
 --[[
 ════════════════════════════════════════════════════════
-  EMBERUI v2 — USAGE GUIDE
+  EMBERUI v2.1 — WHAT CHANGED FROM v2.0
 ════════════════════════════════════════════════════════
 
-local EmberUI = loadstring(game:HttpGet("YOUR_RAW_URL"))()
+FIXES
+  1. GroupTransparency crash
+     ScrollingFrame does not support GroupTransparency.
+     Tab pages are now CanvasGroup wrappers (which do), with
+     the ScrollingFrame as a child for scrolling content.
 
-─── Create a Window ────────────────────────────────────
-local Win = EmberUI:CreateWindow({
-    Title    = "My Script",
-    Subtitle = "v2.0",
-    Icon     = "flame",            -- any icon format (see below)
-    Size     = { 500, 340 },
-    Theme    = "Dark",             -- "Dark" | "Light"
+  2. Interactable on wrong object
+     Was set on the ScrollingFrame constructor props alongside
+     GroupTransparency — both invalid there. Now set on the
+     CanvasGroup wrapper, which supports it correctly.
 
-    -- Background image (optional — nil = clean solid bg)
-    -- Background     = "rbxassetid://YOUR_ID",
-    -- BackgroundBlur = 4,
+  3. Hover nil bug (forward reference)
+     tabClickBtn.MouseEnter/Leave referenced `page` before it was
+     declared, so the comparison `_curPage ~= page` was always
+     comparing against nil. The hover connections now capture
+     `pageGroup` (the CanvasGroup) in the same scope they are
+     created, after it is declared.
 
-    -- Toggle key (default K)
-    ToggleKey = Enum.KeyCode.RightShift,
+ICON SYSTEM OVERHAUL
+  4. Fake rbxassetid table replaced with live CDN fetching.
+     Roblox ImageLabel.Image accepts HTTPS URLs. Icons are now
+     fetched from api.iconify.design (the same CDN WindUI uses):
+       https://api.iconify.design/lucide/{name}.svg?color=%23ffffff&height=64
+     The white fill is then tinted by ImageColor3, matching WindUI's
+     theming approach. Any Lucide icon name works — not just the
+     ~80 in the old hardcoded table.
 
-    -- Key System
-    Key      = { "ember-alpha-2025" },
-    KeyTitle = "License Required",
-    KeyDesc  = "Get a key at discord.gg/example",
-    KeyLink  = "https://discord.gg/example",
-    KeySaved = true,
-    OnKeyValid = function()
-        print("User authenticated!")
-    end,
-})
+  5. Icon cache (_iconCache table) prevents building the same URL
+     string on every applyIcon call.
 
-─── Icons ──────────────────────────────────────────────
--- Lucide (default — no prefix needed):
-    Icon = "flame"
-    Icon = "shield-check"
-    Icon = "crosshair"
-    Icon = "sliders-horizontal"
+  6. Solar icons work via the same CDN:
+       solar:pen-bold → https://api.iconify.design/solar/pen-bold.svg
+     Other prefix sets fall back to Lucide (no separate tables needed).
 
--- Lucide with explicit prefix:
-    Icon = "lucide:flame"
-
--- Solar:
-    Icon = "solar:pen-bold"
-
--- Roblox asset:
-    Icon = "rbxassetid://123456789"
-
--- Image URL:
-    Icon = "https://example.com/icon.png"
-
-─── Tabs & Sections ────────────────────────────────────
-local MainTab   = Win:AddTab({ Title = "Main",   Icon = "crosshair"  })
-local VisualTab = Win:AddTab({ Title = "Visual", Icon = "eye"        })
-local MiscTab   = Win:AddTab({ Title = "Misc",   Icon = "settings"   })
-
-local Combat = MainTab:AddSection("Combat")
-
-─── Elements ───────────────────────────────────────────
-Combat:AddLabel({ Title = "Aimbot options", Icon = "target" })
-
-local aimbotToggle = Combat:AddToggle({
-    Title    = "Aimbot",
-    Icon     = "crosshair",
-    Default  = false,
-    Callback = function(v) print("Aimbot:", v) end,
-})
-
-local fovSlider = Combat:AddSlider({
-    Title    = "FOV",
-    Icon     = "maximize-2",
-    Min      = 10,
-    Max      = 360,
-    Default  = 90,
-    Step     = 1,
-    Suffix   = "°",
-    Callback = function(v) print("FOV:", v) end,
-})
-
-Combat:AddDropdown({
-    Title    = "Target Part",
-    Icon     = "user",
-    Options  = { "Head", "Torso", "HumanoidRootPart" },
-    Default  = "Head",
-    Callback = function(v) print("Part:", v) end,
-})
-
-Combat:AddButton({
-    Title    = "Teleport to Nearest",
-    Icon     = "map-pin",
-    Btn      = "Go",
-    Callback = function() print("Teleporting!") end,
-})
-
-Combat:AddKeybind({
-    Title   = "Toggle Aimbot",
-    Icon    = "key",
-    Default = Enum.KeyCode.X,
-    OnPress = function() aimbotToggle:Toggle() end,
-})
-
-Combat:AddTextbox({
-    Title       = "Custom Text",
-    Icon        = "type",
-    Placeholder = "Enter value...",
-    Callback    = function(v) print("Value:", v) end,
-})
-
-Combat:AddSeparator()
-
-─── Runtime API ────────────────────────────────────────
--- Programmatic control
-aimbotToggle:Set(true)
-print(fovSlider:Get())
-fovSlider:Set(120)
-
--- Notifications
-Win:Notify({
-    Title    = "Script Loaded",
-    Content  = "EmberUI v2 is ready.",
-    Type     = "Success",   -- Info | Success | Warning | Error
-    Icon     = "sparkles",  -- optional override icon
-    Duration = 5,
-})
-
--- Theme
-Win:SetTheme("Light")
-
--- Background
-Win:SetBackground("rbxassetid://YOUR_ID", 0.5)
-
--- Destroy
-Win:Destroy()
-
+USAGE — no API changes
+  The public API (CreateWindow, AddTab, AddSection, all elements,
+  Notify, SetTheme, SetBackground, Destroy) is 100% unchanged.
+  Existing scripts work without modification.
 ════════════════════════════════════════════════════════
 ]]
