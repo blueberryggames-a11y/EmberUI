@@ -1,5 +1,5 @@
 --[[
-    EmberUI - Standalone Roblox UI Library V1
+    EmberUI - Standalone Roblox UI Library v2
     A LocalScript-based UI library using only standard Roblox APIs.
     Place this as a LocalScript inside StarterPlayerScripts (or any client-side container).
 
@@ -163,21 +163,36 @@ function EmberUI.CreateWindow(title)
         Parent = PlayerGui,
     })
 
-    -- drop shadow behind the window
-    local shadow = create("ImageLabel", {
+    -- drop shadow behind the window (procedural - layered rounded frames for a soft blur look)
+    local shadow = create("Frame", {
         Name = "Shadow",
         AnchorPoint = Vector2.new(0.5, 0.5),
-        Position = UDim2.new(0.5, 0, 0.5, 4),
-        Size = UDim2.new(1, 60, 1, 60),
+        Position = UDim2.new(0.5, 0, 0.5, 0),
+        Size = UDim2.new(1, 0, 1, 0),
         BackgroundTransparency = 1,
-        Image = "rbxassetid://1316045217",
-        ImageColor3 = Color3.fromRGB(0, 0, 0),
-        ImageTransparency = 0.4,
-        ScaleType = Enum.ScaleType.Slice,
-        SliceCenter = Rect.new(10, 10, 118, 118),
         ZIndex = 0,
         Parent = screenGui,
     })
+
+    local shadowLayers = {}
+    do
+        local layerCount = 5
+        for i = 1, layerCount do
+            local extra = i * 10
+            local layer = create("Frame", {
+                Name = "Layer" .. i,
+                AnchorPoint = Vector2.new(0.5, 0.5),
+                Position = UDim2.new(0.5, 0, 0.5, 2),
+                Size = UDim2.new(1, extra, 1, extra),
+                BackgroundColor3 = Color3.fromRGB(0, 0, 0),
+                BackgroundTransparency = 1 - (0.10 - (i - 1) * 0.015),
+                BorderSizePixel = 0,
+                ZIndex = 0,
+                Parent = shadow,
+            }, { corner(10 + i * 2) })
+            table.insert(shadowLayers, layer)
+        end
+    end
 
     local mainFrame = create("Frame", {
         Name = "MainFrame",
@@ -191,18 +206,16 @@ function EmberUI.CreateWindow(title)
     }, { corner(10) })
 
     -- keep the shadow following/sizing with the main frame
-    shadow.Size = UDim2.new(mainFrame.Size.X.Scale, mainFrame.Size.X.Offset + 60, mainFrame.Size.Y.Scale, mainFrame.Size.Y.Offset + 60)
-    mainFrame:GetPropertyChangedSignal("Position"):Connect(function()
-        shadow.Position = UDim2.new(mainFrame.Position.X.Scale, mainFrame.Position.X.Offset, mainFrame.Position.Y.Scale, mainFrame.Position.Y.Offset + 4)
-    end)
-    mainFrame:GetPropertyChangedSignal("Size"):Connect(function()
-        shadow.Size = UDim2.new(mainFrame.Size.X.Scale, mainFrame.Size.X.Offset + 60, mainFrame.Size.Y.Scale, mainFrame.Size.Y.Offset + 60)
-    end)
-    mainFrame:GetPropertyChangedSignal("AnchorPoint"):Connect(function()
+    local function syncShadow()
         shadow.AnchorPoint = mainFrame.AnchorPoint
-    end)
-    shadow.AnchorPoint = mainFrame.AnchorPoint
-    shadow.Position = UDim2.new(mainFrame.Position.X.Scale, mainFrame.Position.X.Offset, mainFrame.Position.Y.Scale, mainFrame.Position.Y.Offset + 4)
+        shadow.Position = UDim2.new(mainFrame.Position.X.Scale, mainFrame.Position.X.Offset, mainFrame.Position.Y.Scale, mainFrame.Position.Y.Offset)
+        shadow.Size = mainFrame.Size
+    end
+
+    mainFrame:GetPropertyChangedSignal("Position"):Connect(syncShadow)
+    mainFrame:GetPropertyChangedSignal("Size"):Connect(syncShadow)
+    mainFrame:GetPropertyChangedSignal("AnchorPoint"):Connect(syncShadow)
+    syncShadow()
 
     -- optional background image holder (defaults to none -> solid black/theme color)
     local bgImage = create("ImageLabel", {
@@ -340,10 +353,17 @@ function EmberUI.CreateWindow(title)
 
         mainFrame.Size = UDim2.new(targetSize.X.Scale * 0.85, targetSize.X.Offset * 0.85, targetSize.Y.Scale * 0.85, targetSize.Y.Offset * 0.85)
         mainFrame.BackgroundTransparency = 1
-        shadow.ImageTransparency = 1
+
+        local shadowTargets = {}
+        for _, layer in ipairs(shadowLayers) do
+            shadowTargets[layer] = layer.BackgroundTransparency
+            layer.BackgroundTransparency = 1
+        end
 
         tween(mainFrame, { Size = targetSize, BackgroundTransparency = 0 }, 0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
-        tween(shadow, { ImageTransparency = 0.4 }, 0.35)
+        for layer, targetTransparency in pairs(shadowTargets) do
+            tween(layer, { BackgroundTransparency = targetTransparency }, 0.35)
+        end
     end
     do
         local dragging = false
@@ -473,13 +493,77 @@ function EmberUI.CreateWindow(title)
         screenGui:Destroy()
     end)
 
-    -- toggle window visibility with K by default
+    -- toggle window visibility with K by default, with an animated open/close
     local toggleKey = Enum.KeyCode.K
+    local uiVisible = true
+    local animatingVisibility = false
+
+    local function setShadowTransparency(alphaMultiplier)
+        for i, layer in ipairs(shadowLayers) do
+            local baseTransparency = 1 - (0.10 - (i - 1) * 0.015)
+            local fadedTransparency = 1 - (1 - baseTransparency) * alphaMultiplier
+            layer.BackgroundTransparency = fadedTransparency
+        end
+    end
+
+    local function animateClose()
+        if animatingVisibility then return end
+        animatingVisibility = true
+
+        local currentSize = mainFrame.Size
+        local shrunkSize = UDim2.new(currentSize.X.Scale * 0.85, currentSize.X.Offset * 0.85, currentSize.Y.Scale * 0.85, currentSize.Y.Offset * 0.85)
+
+        tween(mainFrame, { Size = shrunkSize, BackgroundTransparency = 1 }, 0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+        for i = 0, 9 do
+            task.delay(i / 10 * 0.2, function()
+                setShadowTransparency(1 - i / 10)
+            end)
+        end
+
+        task.delay(0.2, function()
+            screenGui.Enabled = false
+            mainFrame.Size = currentSize
+            mainFrame.BackgroundTransparency = 0
+            setShadowTransparency(1)
+            animatingVisibility = false
+        end)
+    end
+
+    local function animateOpen()
+        if animatingVisibility then return end
+        animatingVisibility = true
+
+        local targetSize = mainFrame.Size
+        local shrunkSize = UDim2.new(targetSize.X.Scale * 0.85, targetSize.X.Offset * 0.85, targetSize.Y.Scale * 0.85, targetSize.Y.Offset * 0.85)
+
+        mainFrame.Size = shrunkSize
+        mainFrame.BackgroundTransparency = 1
+        setShadowTransparency(0)
+        screenGui.Enabled = true
+
+        tween(mainFrame, { Size = targetSize, BackgroundTransparency = 0 }, 0.25, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+        for i = 0, 9 do
+            task.delay(i / 10 * 0.25, function()
+                setShadowTransparency(i / 10)
+            end)
+        end
+
+        task.delay(0.25, function()
+            setShadowTransparency(1)
+            animatingVisibility = false
+        end)
+    end
+
     UserInputService.InputBegan:Connect(function(input, gameProcessed)
         if gameProcessed then return end
         if input.KeyCode == toggleKey then
-            screenGui.Enabled = not screenGui.Enabled
-            shadow.Visible = screenGui.Enabled
+            if uiVisible then
+                uiVisible = false
+                animateClose()
+            else
+                uiVisible = true
+                animateOpen()
+            end
         end
     end)
 
@@ -680,19 +764,30 @@ function EmberUI.CreateWindow(title)
                 Name = "ToggleBg",
                 AnchorPoint = Vector2.new(1, 0.5),
                 Position = UDim2.new(1, -12, 0.5, 0),
-                Size = UDim2.new(0, 36, 0, 18),
+                Size = UDim2.new(0, 46, 0, 24),
                 BackgroundColor3 = toggled and Theme.ToggleOn or Theme.ToggleOff,
                 Parent = holder,
-            }, { corner(9) })
+            }, { corner(12) })
 
             local sideTog = create("Frame", {
                 Name = "Knob",
                 AnchorPoint = toggled and Vector2.new(1, 0.5) or Vector2.new(0, 0.5),
-                Position = toggled and UDim2.new(1, -2, 0.5, 0) or UDim2.new(0, 2, 0.5, 0),
-                Size = UDim2.new(0, 14, 0, 14),
+                Position = toggled and UDim2.new(1, -3, 0.5, 0) or UDim2.new(0, 3, 0.5, 0),
+                Size = UDim2.new(0, 18, 0, 18),
                 BackgroundColor3 = Color3.fromRGB(255, 255, 255),
                 Parent = toggleBg,
-            }, { corner(7) })
+            }, { corner(9) })
+
+            local knobIcon = create("ImageLabel", {
+                Name = "Icon",
+                AnchorPoint = Vector2.new(0.5, 0.5),
+                Position = UDim2.new(0.5, 0, 0.5, 0),
+                Size = UDim2.new(0, 12, 0, 12),
+                BackgroundTransparency = 1,
+                Image = resolveIcon(toggled and "check" or "x") or "",
+                ImageColor3 = toggled and Theme.ToggleOn or Theme.ToggleOff,
+                Parent = sideTog,
+            })
 
             holder.MouseEnter:Connect(function()
                 tween(holder, { BackgroundTransparency = 0.7 }, 0.15)
@@ -706,12 +801,15 @@ function EmberUI.CreateWindow(title)
 
                 tween(sideTog, {
                     AnchorPoint = toggled and Vector2.new(1, 0.5) or Vector2.new(0, 0.5),
-                    Position = toggled and UDim2.new(1, -2, 0.5, 0) or UDim2.new(0, 2, 0.5, 0),
+                    Position = toggled and UDim2.new(1, -3, 0.5, 0) or UDim2.new(0, 3, 0.5, 0),
                 }, 0.15)
 
                 tween(toggleBg, {
                     BackgroundColor3 = toggled and Theme.ToggleOn or Theme.ToggleOff,
                 }, 0.15)
+
+                knobIcon.Image = resolveIcon(toggled and "check" or "x") or ""
+                knobIcon.ImageColor3 = toggled and Theme.ToggleOn or Theme.ToggleOff
 
                 callback(toggled)
             end)
@@ -724,8 +822,10 @@ function EmberUI.CreateWindow(title)
                 Set = function(_, value)
                     toggled = value
                     sideTog.AnchorPoint = toggled and Vector2.new(1, 0.5) or Vector2.new(0, 0.5)
-                    sideTog.Position = toggled and UDim2.new(1, -2, 0.5, 0) or UDim2.new(0, 2, 0.5, 0)
+                    sideTog.Position = toggled and UDim2.new(1, -3, 0.5, 0) or UDim2.new(0, 3, 0.5, 0)
                     toggleBg.BackgroundColor3 = toggled and Theme.ToggleOn or Theme.ToggleOff
+                    knobIcon.Image = resolveIcon(toggled and "check" or "x") or ""
+                    knobIcon.ImageColor3 = toggled and Theme.ToggleOn or Theme.ToggleOff
                     callback(toggled)
                 end,
             }
