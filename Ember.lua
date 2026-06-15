@@ -1,5 +1,5 @@
 --[[
-    EmberUI - Standalone Roblox UI Library v3
+    EmberUI - Standalone Roblox UI Library v3.1
     A LocalScript-based UI library using only standard Roblox APIs.
     Place this as a LocalScript inside StarterPlayerScripts (or any client-side container).
 
